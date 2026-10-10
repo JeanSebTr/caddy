@@ -27,6 +27,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -757,5 +758,34 @@ func TestFuncPlaceholderPropagatesOnlyBodyLimitMarker(t *testing.T) {
 				t.Errorf("expected the error text in the output but got %q", out)
 			}
 		})
+	}
+}
+
+var registerSensitiveTestProvider sync.Once
+
+// a placeholder namespace registered as sensitive (e.g. secrets)
+// must not be readable from templates, whose contents may not
+// be trusted
+func TestFuncPlaceholderOmitsSensitiveProviders(t *testing.T) {
+	registerSensitiveTestProvider.Do(func() {
+		caddy.RegisterReplacementProvider(caddy.ReplacementProvider{
+			Namespace: "templatestestsecrets",
+			Func: func(key string) (any, bool) {
+				return "s3cr3t", true
+			},
+			Sensitive: true,
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = req.WithContext(context.WithValue(req.Context(), caddy.ReplacerCtxKey, caddy.NewReplacer()))
+	c := TemplateContext{Req: req}
+
+	out, err := c.funcPlaceholder("templatestestsecrets.api_token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "" {
+		t.Errorf("expected sensitive placeholder to be empty in templates, got %q", out)
 	}
 }

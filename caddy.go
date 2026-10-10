@@ -536,6 +536,13 @@ func provisionContext(newCfg *Config, replaceAdminServer bool) (Context, error) 
 	newCfg.apps = make(map[string]App)
 	newCfg.failedApps = make(map[string]error)
 
+	// provision the apps backing replacement providers first,
+	// since storage and other apps may use their placeholders
+	err = provisionReplacementProviderApps(ctx, newCfg)
+	if err != nil {
+		return ctx, err
+	}
+
 	// set up global storage and make it CertMagic's default storage, too
 	err = func() error {
 		if newCfg.StorageRaw != nil {

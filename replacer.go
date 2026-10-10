@@ -41,11 +41,13 @@ func NewReplacer() *Replacer {
 		fileReplacementProvider{},
 		ReplacerFunc(rep.fromStatic),
 	}
+	rep.registered = loadRegisteredProviders()
 	return rep
 }
 
 // NewEmptyReplacer returns a new Replacer,
-// without the global default replacements.
+// without the global default replacements
+// nor registered replacement providers.
 func NewEmptyReplacer() *Replacer {
 	rep := &Replacer{
 		static:   make(map[string]any),
@@ -62,13 +64,18 @@ func NewEmptyReplacer() *Replacer {
 // use NewReplacer to make one.
 type Replacer struct {
 	providers []replacementProvider
-	static    map[string]any
-	mapMutex  *sync.RWMutex
+	// registered holds the global providers from
+	// RegisterReplacementProvider; they are consulted
+	// after all other providers
+	registered []registeredProvider
+	static     map[string]any
+	mapMutex   *sync.RWMutex
 }
 
 // WithoutFile returns a copy of the current Replacer
 // without support for the {file.*} placeholder, which
-// may be unsafe in some contexts.
+// may be unsafe in some contexts. Sensitive registered
+// replacement providers are omitted as well.
 //
 // EXPERIMENTAL: Subject to change or removal.
 func (r *Replacer) WithoutFile() *Replacer {
@@ -78,6 +85,12 @@ func (r *Replacer) WithoutFile() *Replacer {
 			continue
 		}
 		rep.providers = append(rep.providers, v)
+	}
+	for _, v := range r.registered {
+		if v.sensitive {
+			continue
+		}
+		rep.registered = append(rep.registered, v)
 	}
 	return rep
 }
@@ -100,6 +113,11 @@ func (r *Replacer) Set(variable string, value any) {
 func (r *Replacer) Get(variable string) (any, bool) {
 	for _, mapFunc := range r.providers {
 		if val, ok := mapFunc.replace(variable); ok {
+			return val, true
+		}
+	}
+	for _, p := range r.registered {
+		if val, ok := p.replace(variable); ok {
 			return val, true
 		}
 	}
